@@ -1,7 +1,9 @@
 /// <reference path="../../definitions/vsts-task-lib.d.ts" />
 
+import os = require('os');
 import path = require('path');
 import tl = require('vsts-task-lib/task');
+import tr = require('vsts-task-lib/toolrunner');
 
 tl.setResourcePath(path.join(__dirname, 'task.json'));
 
@@ -29,13 +31,29 @@ try {
         tl.command("artifact.upload", data, pathtoPublish);
     }
     else if (artifactType === "filepath") {
+        data["artifactlocation"] = targetPath;
+
         var artifactPath: string = path.join(targetPath, artifactName);
         tl.mkdirP(artifactPath);
-        tl.cp("-Rf", path.join(pathtoPublish, "*"), artifactPath);
-            
-        // add artifactlocation to ##vso command's properties for back compat of old Xplat agent
-        data["artifactlocation"] = targetPath;
-        tl.command("artifact.associate", data, targetPath);
+
+        if (os.platform() == 'win32') {
+            var robocopy: tr.ToolRunner = new tr.ToolRunner("robocopy");
+            robocopy.arg("/E"); // copy subdirectories, including Empty ones.
+            robocopy.arg("/R:3"); // number of Retries on failed copies
+            robocopy.arg(pathtoPublish); // source
+            robocopy.arg(artifactPath); // destination
+            robocopy.arg("*"); // file
+            var result: tr.IExecResult = robocopy.execSync();
+            if (result.code >= 8) {
+                tl.setResult(tl.TaskResult.Failed, tl.loc('RobocopyFailed', result.code))
+            }
+
+            tl.command("artifact.associate", data, targetPath);
+        }
+        else {
+            tl.cp("-Rf", path.join(pathtoPublish, "*"), artifactPath);
+        }
+
     }
 }
 catch (err) {
